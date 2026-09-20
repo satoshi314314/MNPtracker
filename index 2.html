@@ -1,0 +1,783 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MNP管理ノート</title>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #0a0f1e; color: #e2e8f0; font-family: 'Hiragino Kaku Gothic ProN', 'Noto Sans JP', sans-serif; }
+    input, select, textarea, button { font-family: inherit; }
+    input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.5); }
+    ::-webkit-scrollbar { width: 4px; } ::-webkit-scrollbar-track { background: #0a0f1e; } ::-webkit-scrollbar-thumb { background: #1e3a5f; border-radius: 2px; }
+  </style>
+</head>
+<body>
+<div id="root"></div>
+<script type="text/babel">
+const { useState, useEffect } = React;
+
+const CARRIERS = ["docomo","au","SoftBank","楽天Mobile","ahamo","povo","LINEMO","UQmobile","Y!mobile","IIJmio","mineo","NUROmobile","その他"];
+const STATUS_LABELS = { active: "運用中", ended: "終了" };
+const INCOME_TYPES = [
+  { value: "cash",     label: "現金",           icon: "💴" },
+  { value: "jcb",      label: "JCBギフトカード", icon: "🎁" },
+  { value: "quo",      label: "QUOカード",       icon: "🃏" },
+  { value: "aeon",     label: "イオン商品券",    icon: "🛍" },
+  { value: "amazon",   label: "Amazonギフト券",  icon: "📦" },
+  { value: "rakuten",  label: "楽天ポイント",    icon: "🔴" },
+  { value: "dpoint",   label: "dポイント",       icon: "🔵" },
+  { value: "aupoint",  label: "Pontaポイント",   icon: "🟠" },
+  { value: "paypay",   label: "PayPayポイント",  icon: "🟡" },
+  { value: "linepay",  label: "LINEポイント",    icon: "🟢" },
+  { value: "discount", label: "月額割引",        icon: "📉" },
+  { value: "other",    label: "その他",          icon: "💰" },
+];
+const typeMap = Object.fromEntries(INCOME_TYPES.map(t => [t.value, t]));
+
+const initialRecords = [
+  {
+    id: 1, carrier: "楽天Mobile", startDate: "2023-04-01", endDate: "2024-01-15", status: "ended",
+    phoneNumber: "070-XXXX-XXXX", plan: "Rakuten最強プラン",
+    monthlyFees: [
+      { label: "1ヶ月め", amount: 0, note: "無料キャンペーン" },
+      { label: "2ヶ月め", amount: 0, note: "" },
+      { label: "3ヶ月め", amount: 0, note: "" },
+    ],
+    incomes: [
+      { type: "cash", amount: 20000, note: "MNP転入ボーナス", status: "received", date: "2023-04-10" },
+      { type: "quo",  amount: 10000, note: "キャンペーン特典", status: "expected", date: "2023-07-01" },
+    ],
+    setupCost: 3300, otherCost: 0,
+    notes: "1年間無料キャンペーン利用。MNP転出手数料なし。",
+  },
+];
+
+function calcProfit(r) {
+  const income = (r.incomes || []).reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const monthlyTotal = (r.monthlyFees || []).reduce((s, m) => s + (Number(m.amount) || 0), 0);
+  const cost = (r.setupCost || 0) + (r.otherCost || 0) + monthlyTotal;
+  return { profit: income - cost, income, cost, monthlyTotal, months: (r.monthlyFees || []).length };
+}
+function fmtDate(d) { return d ? d.replace(/-/g, "/") : "—"; }
+
+const IS = {
+  width: "100%", boxSizing: "border-box", padding: "10px 12px", borderRadius: 10,
+  border: "1px solid #1e293b", background: "#0d1117", color: "#e2e8f0",
+  fontSize: 14, outline: "none",
+};
+
+function Badge({ status }) {
+  return <span style={{ display:"inline-block", padding:"2px 10px", borderRadius:99, fontSize:11, fontWeight:700,
+    background: status==="active"?"#00ffc6":"#334155", color: status==="active"?"#003d2e":"#94a3b8" }}>
+    {STATUS_LABELS[status]}</span>;
+}
+function ProfitChip({ value }) {
+  return <span style={{ fontFamily:"monospace", fontWeight:700, fontSize:15, color: value>=0?"#00ffc6":"#ff6b6b" }}>
+    {value>=0?"+":""}{value.toLocaleString()}円</span>;
+}
+
+function TypePicker({ value, onChange }) {
+  const [open, setOpen] = useState(false);
+  const cur = typeMap[value] || INCOME_TYPES[0];
+  return (
+    <div style={{ position:"relative" }}>
+      <button onClick={() => setOpen(o=>!o)} style={{ ...IS, padding:"8px 10px", display:"flex", alignItems:"center",
+        gap:6, cursor:"pointer", width:"auto", minWidth:148, background:"#1a2535" }}>
+        <span>{cur.icon}</span>
+        <span style={{ fontSize:12 }}>{cur.label}</span>
+        <span style={{ marginLeft:"auto", fontSize:10, color:"#64748b" }}>▼</span>
+      </button>
+      {open && (
+        <div style={{ position:"absolute", top:"100%", left:0, zIndex:200,
+          background:"#1a2535", border:"1px solid #1e293b", borderRadius:10,
+          minWidth:180, boxShadow:"0 8px 32px #00000080", padding:4 }}>
+          {INCOME_TYPES.map(t => (
+            <button key={t.value} onClick={() => { onChange(t.value); setOpen(false); }} style={{
+              display:"flex", alignItems:"center", gap:8, width:"100%", padding:"8px 12px",
+              background: value===t.value?"#00ffc620":"none", border:"none",
+              color: value===t.value?"#00ffc6":"#e2e8f0", fontSize:13, cursor:"pointer", borderRadius:7, textAlign:"left" }}>
+              <span>{t.icon}</span><span>{t.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function IncomeEditor({ incomes, onChange }) {
+  const upd = (i,k,v) => onChange(incomes.map((x,idx)=>idx===i?{...x,[k]:v}:x));
+  const add = () => onChange([...incomes,{type:"cash",amount:"",note:"",status:"expected",date:""}]);
+  const rm  = (i) => onChange(incomes.filter((_,idx)=>idx!==i));
+  const total = incomes.reduce((s,i)=>s+(Number(i.amount)||0),0);
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+        <label style={{ fontSize:12, color:"#64748b", fontWeight:700 }}>収入（種類ごと）</label>
+        <span style={{ fontSize:12, color:"#00ffc6", fontFamily:"monospace" }}>合計 +{total.toLocaleString()}円</span>
+      </div>
+      <div style={{ background:"#0d1117", borderRadius:12, border:"1px solid #1e293b", overflow:"visible" }}>
+        {incomes.map((item,i) => (
+          <div key={i} style={{ borderBottom: i<incomes.length-1?"1px solid #1e293b":"none", padding:"10px 12px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6, flexWrap:"wrap" }}>
+              <TypePicker value={item.type} onChange={v=>upd(i,"type",v)} />
+              <input type="number" value={item.amount} placeholder="0"
+                onChange={e=>upd(i,"amount",e.target.value)}
+                style={{ ...IS, padding:"8px 10px", fontSize:13, flex:1, minWidth:80, textAlign:"right" }} />
+              <span style={{ fontSize:12, color:"#64748b" }}>円</span>
+              <button onClick={()=>rm(i)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:18, padding:"0 4px" }}>×</button>
+            </div>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+              <div style={{ display:"flex", borderRadius:8, overflow:"hidden", border:"1px solid #1e293b", flexShrink:0 }}>
+                {[{v:"received",label:"✅ 受取済み"},{v:"expected",label:"⏳ 予定"}].map(opt=>(
+                  <button key={opt.v} onClick={()=>upd(i,"status",opt.v)} style={{
+                    padding:"6px 12px", border:"none", cursor:"pointer", fontSize:11, fontWeight:700,
+                    background:(item.status||"expected")===opt.v?(opt.v==="received"?"#00ffc620":"#7c3aed30"):"#0d1117",
+                    color:(item.status||"expected")===opt.v?(opt.v==="received"?"#00ffc6":"#a78bfa"):"#475569" }}>
+                    {opt.label}
+                  </button>
+                ))}
+              </div>
+              <input type="date" value={item.date||""} onChange={e=>upd(i,"date",e.target.value)}
+                style={{ ...IS, padding:"6px 10px", fontSize:12, flex:1, color:item.date?"#e2e8f0":"#475569" }} />
+            </div>
+            <input type="text" value={item.note} placeholder="メモ（任意）"
+              onChange={e=>upd(i,"note",e.target.value)}
+              style={{ ...IS, padding:"5px 10px", fontSize:12, color:"#94a3b8" }} />
+          </div>
+        ))}
+        <button onClick={add} style={{ width:"100%", padding:"11px 0", background:"none", border:"none",
+          color:"#00ffc6", fontSize:13, fontWeight:700, cursor:"pointer",
+          borderTop: incomes.length?"1px dashed #1e3a5f":"none" }}>＋ 収入を追加</button>
+      </div>
+    </div>
+  );
+}
+
+function MonthlyFeesEditor({ fees, onChange }) {
+  const upd = (i,k,v) => onChange(fees.map((f,idx)=>idx===i?{...f,[k]:v}:f));
+  const add = () => onChange([...fees,{label:`${fees.length+1}ヶ月め`,amount:"",note:""}]);
+  const rm  = (i) => onChange(fees.filter((_,idx)=>idx!==i).map((f,idx)=>({...f,label:`${idx+1}ヶ月め`})));
+  const total = fees.reduce((s,f)=>s+(Number(f.amount)||0),0);
+  return (
+    <div style={{ marginBottom:16 }}>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:8 }}>
+        <label style={{ fontSize:12, color:"#64748b", fontWeight:700 }}>月額料金（月ごと）</label>
+        <span style={{ fontSize:12, color:"#ff6b6b", fontFamily:"monospace" }}>合計 {total.toLocaleString()}円</span>
+      </div>
+      <div style={{ background:"#0d1117", borderRadius:12, border:"1px solid #1e293b", overflow:"hidden" }}>
+        {fees.map((f,i) => (
+          <div key={i} style={{ borderBottom: i<fees.length-1?"1px solid #1e293b":"none", padding:"10px 12px" }}>
+            <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+              <span style={{ fontSize:11, color:"#94a3b8", fontWeight:700, minWidth:60 }}>{f.label}</span>
+              <input type="number" value={f.amount} placeholder="0"
+                onChange={e=>upd(i,"amount",e.target.value)}
+                style={{ ...IS, padding:"6px 10px", fontSize:13, flex:1, textAlign:"right" }} />
+              <span style={{ fontSize:12, color:"#64748b" }}>円</span>
+              {fees.length>1 && <button onClick={()=>rm(i)} style={{ background:"none", border:"none", color:"#475569", cursor:"pointer", fontSize:18, padding:"0 4px" }}>×</button>}
+            </div>
+            <input type="text" value={f.note} placeholder="メモ（任意）"
+              onChange={e=>upd(i,"note",e.target.value)}
+              style={{ ...IS, padding:"5px 10px", fontSize:12, color:"#94a3b8" }} />
+          </div>
+        ))}
+        <button onClick={add} style={{ width:"100%", padding:"11px 0", background:"none", border:"none",
+          color:"#7dd3fc", fontSize:13, fontWeight:700, cursor:"pointer",
+          borderTop: fees.length?"1px dashed #1e3a5f":"none" }}>＋ 月を追加</button>
+      </div>
+    </div>
+  );
+}
+
+function RecordCard({ r, onEdit, onDelete }) {
+  const [exp, setExp] = useState(false);
+  const { profit, income, cost, monthlyTotal, months } = calcProfit(r);
+  return (
+    <div style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:16, marginBottom:12, overflow:"hidden" }}>
+      <div style={{ padding:"16px 16px 12px" }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:6 }}>
+          <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+            <span style={{ fontSize:18, fontWeight:900, color:"#fff" }}>{r.carrier}</span>
+            <Badge status={r.status} />
+          </div>
+          <ProfitChip value={profit} />
+        </div>
+        {r.plan && <div style={{ fontSize:12, color:"#7dd3fc", marginBottom:3 }}>📦 {r.plan}</div>}
+        {r.phoneNumber && <div style={{ fontSize:12, color:"#94a3b8", marginBottom:3 }}>📞 {r.phoneNumber}</div>}
+        <div style={{ fontSize:12, color:"#64748b", marginBottom:10 }}>
+          🗓 {fmtDate(r.startDate)} 〜 {r.endDate?fmtDate(r.endDate):"現在"} ({months}ヶ月)
+        </div>
+        {(r.incomes||[]).length>0 && (
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:10 }}>
+            {(r.incomes||[]).map((inc,i) => {
+              const t = typeMap[inc.type]||{icon:"💰",label:inc.type};
+              const recv = (inc.status||"expected")==="received";
+              return <div key={i} style={{ background:recv?"#00ffc610":"#7c3aed18",
+                border:`1px solid ${recv?"#00ffc630":"#7c3aed40"}`,
+                borderRadius:8, padding:"4px 10px", fontSize:12, display:"flex", alignItems:"center", gap:5 }}>
+                <span>{t.icon}</span>
+                <span style={{ color:"#94a3b8" }}>{t.label}</span>
+                <span style={{ color:recv?"#00ffc6":"#a78bfa", fontFamily:"monospace", fontWeight:700 }}>+{(Number(inc.amount)||0).toLocaleString()}</span>
+                <span style={{ fontSize:10 }}>{recv?"✅":"⏳"}</span>
+              </div>;
+            })}
+          </div>
+        )}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:6 }}>
+          {[
+            {label:"収入合計",value:income,color:"#00ffc6"},
+            {label:"出費合計",value:cost,color:"#ff6b6b"},
+            {label:"純利益",value:profit,color:profit>=0?"#00ffc6":"#ff6b6b"},
+          ].map(s=>(
+            <div key={s.label} style={{ background:"#0d1117", borderRadius:8, padding:"8px 10px", textAlign:"center" }}>
+              <div style={{ fontSize:10, color:"#475569", marginBottom:3 }}>{s.label}</div>
+              <div style={{ fontSize:12, fontWeight:700, color:s.value!==0?s.color:"#334155", fontFamily:"monospace" }}>
+                {s.value>0?"+":""}{s.value.toLocaleString()}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <button onClick={()=>setExp(e=>!e)} style={{ width:"100%", padding:"8px 16px", background:"#0d1117",
+        border:"none", borderTop:"1px solid #1e293b", color:"#64748b", fontSize:12, cursor:"pointer",
+        textAlign:"left", display:"flex", alignItems:"center", gap:6 }}>
+        <span style={{ transform:exp?"rotate(90deg)":"none", display:"inline-block", transition:"transform 0.15s", fontSize:10 }}>▶</span>
+        {exp?"詳細を隠す":"詳細を見る"}
+      </button>
+      {exp && (
+        <div style={{ padding:"14px 16px", borderTop:"1px solid #1e293b" }}>
+          {(r.incomes||[]).length>0 && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:11, color:"#64748b", fontWeight:700, marginBottom:8 }}>収入内訳</div>
+              {(r.incomes||[]).map((inc,i)=>{
+                const t=typeMap[inc.type]||{icon:"💰",label:inc.type};
+                const recv=(inc.status||"expected")==="received";
+                return <div key={i} style={{ padding:"8px 0", borderBottom:"1px solid #1e293b18" }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:3 }}>
+                    <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                      <span>{t.icon}</span>
+                      <span style={{ fontSize:12, color:"#94a3b8" }}>{t.label}</span>
+                      <span style={{ fontSize:10, fontWeight:700, padding:"1px 7px", borderRadius:99,
+                        background:recv?"#00ffc620":"#7c3aed30", color:recv?"#00ffc6":"#a78bfa" }}>
+                        {recv?"✅ 受取済み":"⏳ 予定"}
+                      </span>
+                    </div>
+                    <span style={{ fontSize:13, fontFamily:"monospace", color:recv?"#00ffc6":"#a78bfa", fontWeight:700 }}>
+                      +{(Number(inc.amount)||0).toLocaleString()}円
+                    </span>
+                  </div>
+                  <div style={{ display:"flex", gap:12, fontSize:11, color:"#475569", paddingLeft:22 }}>
+                    {inc.date && <span>📅 {recv?"受取日: ":"予定日: "}{inc.date.replace(/-/g,"/")}</span>}
+                    {inc.note && <span>📝 {inc.note}</span>}
+                  </div>
+                </div>;
+              })}
+              <div style={{ display:"flex", justifyContent:"space-between", paddingTop:8, borderTop:"1px solid #1e293b" }}>
+                <span style={{ fontSize:12, color:"#64748b", fontWeight:700 }}>収入合計</span>
+                <span style={{ fontSize:13, fontWeight:700, fontFamily:"monospace", color:"#00ffc6" }}>+{income.toLocaleString()}円</span>
+              </div>
+            </div>
+          )}
+          {(r.monthlyFees||[]).length>0 && (
+            <div style={{ marginBottom:14 }}>
+              <div style={{ fontSize:11, color:"#64748b", fontWeight:700, marginBottom:8 }}>月額料金内訳</div>
+              {(r.monthlyFees||[]).map((f,i)=>(
+                <div key={i} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"6px 0", borderBottom:"1px solid #1e293b18" }}>
+                  <div>
+                    <span style={{ fontSize:12, color:"#94a3b8" }}>{f.label}</span>
+                    {f.note&&<span style={{ fontSize:11, color:"#475569", marginLeft:8 }}>{f.note}</span>}
+                  </div>
+                  <span style={{ fontSize:13, fontFamily:"monospace" }}>{(Number(f.amount)||0).toLocaleString()}円</span>
+                </div>
+              ))}
+              <div style={{ display:"flex", justifyContent:"space-between", paddingTop:8, borderTop:"1px solid #1e293b" }}>
+                <span style={{ fontSize:12, color:"#64748b", fontWeight:700 }}>月額合計</span>
+                <span style={{ fontSize:13, fontWeight:700, fontFamily:"monospace", color:"#ff6b6b" }}>{monthlyTotal.toLocaleString()}円</span>
+              </div>
+            </div>
+          )}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6, marginBottom:12 }}>
+            {[{label:"初期費用",value:r.setupCost},{label:"その他費用",value:r.otherCost}].map(item=>(
+              <div key={item.label} style={{ background:"#0d1117", borderRadius:8, padding:"8px 10px" }}>
+                <div style={{ fontSize:10, color:"#475569", marginBottom:2 }}>{item.label}</div>
+                <div style={{ fontSize:13, fontWeight:700, color:item.value?"#ff6b6b":"#334155", fontFamily:"monospace" }}>
+                  {item.value?`${item.value.toLocaleString()}円`:"—"}
+                </div>
+              </div>
+            ))}
+          </div>
+          {r.notes && <div style={{ background:"#0d1117", borderLeft:"3px solid #1e3a5f", borderRadius:"0 8px 8px 0",
+            padding:"8px 12px", fontSize:12, color:"#94a3b8", lineHeight:1.6, marginBottom:12 }}>📝 {r.notes}</div>}
+          <div style={{ display:"flex", gap:8 }}>
+            <button onClick={onEdit} style={{ flex:1, padding:"8px 0", borderRadius:8, border:"1px solid #1e3a5f",
+              background:"transparent", color:"#7dd3fc", fontSize:13, fontWeight:600, cursor:"pointer" }}>編集</button>
+            <button onClick={onDelete} style={{ padding:"8px 16px", borderRadius:8, border:"1px solid #3f1515",
+              background:"transparent", color:"#ff6b6b", fontSize:13, fontWeight:600, cursor:"pointer" }}>削除</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+const emptyForm = {
+  carrier:"docomo", startDate:"", endDate:"", status:"active",
+  phoneNumber:"", plan:"",
+  monthlyFees:[{label:"1ヶ月め",amount:"",note:""}],
+  incomes:[{type:"cash",amount:"",note:"",status:"expected",date:""}],
+  setupCost:"", otherCost:"", notes:"",
+};
+
+function App() {
+  const [records, setRecords] = useState(()=>{
+    try { return JSON.parse(localStorage.getItem("mnp_v1")||"null")||initialRecords; } catch { return initialRecords; }
+  });
+  const [modal, setModal] = useState(null);
+  const [form, setForm] = useState(emptyForm);
+  const [delConfirm, setDelConfirm] = useState(null);
+  const [tab, setTab] = useState("list");
+  const [importModal, setImportModal] = useState(false);
+  const [importPreview, setImportPreview] = useState(null);
+  const [importError, setImportError] = useState("");
+  const [importMode, setImportMode] = useState("merge");
+
+  useEffect(()=>{ localStorage.setItem("mnp_v1",JSON.stringify(records)); },[records]);
+
+  const openAdd = () => { setForm({...emptyForm}); setModal("add"); };
+  const openEdit = (r) => {
+    setForm({ ...emptyForm, ...r,
+      setupCost: r.setupCost??"", otherCost: r.otherCost??"",
+      monthlyFees: (r.monthlyFees||[]).map(f=>({...f,amount:String(f.amount)})),
+      incomes: (r.incomes||[]).map(i=>({status:"expected",date:"",...i,amount:String(i.amount)})),
+    });
+    setModal(r.id);
+  };
+  const closeModal = () => setModal(null);
+
+  const saveForm = () => {
+    const n = v => v===""?0:Number(v);
+    const entry = { ...form,
+      setupCost:n(form.setupCost), otherCost:n(form.otherCost),
+      monthlyFees:(form.monthlyFees||[]).map(f=>({...f,amount:n(f.amount)})),
+      incomes:(form.incomes||[]).map(i=>({...i,amount:n(i.amount)})),
+    };
+    if (modal==="add") setRecords(rs=>[...rs,{...entry,id:Date.now()}]);
+    else setRecords(rs=>rs.map(r=>r.id===modal?{...r,...entry}:r));
+    closeModal();
+  };
+
+  const delRecord = id => { setRecords(rs=>rs.filter(r=>r.id!==id)); setDelConfirm(null); };
+
+  const handleExport = () => {
+    const blob = new Blob([JSON.stringify(records,null,2)],{type:"application/json"});
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `mnp-data-${new Date().toISOString().slice(0,10)}.json`;
+    a.click();
+  };
+
+  const handleImportFile = e => {
+    const file = e.target.files?.[0]; if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const p = JSON.parse(ev.target.result);
+        if(!Array.isArray(p)) throw new Error("配列形式のJSONではありません");
+        setImportPreview(p); setImportError("");
+      } catch(err) { setImportPreview(null); setImportError("読み込みエラー: "+err.message); }
+    };
+    reader.readAsText(file); e.target.value="";
+  };
+
+  const confirmImport = () => {
+    if(!importPreview) return;
+    if(importMode==="replace") { setRecords(importPreview); }
+    else { const ids=new Set(records.map(r=>r.id)); setRecords(rs=>[...rs,...importPreview.filter(r=>!ids.has(r.id))]); }
+    setImportModal(false); setImportPreview(null); setImportError("");
+  };
+
+  const totals = records.reduce((acc,r)=>{
+    const {profit,income,cost}=calcProfit(r);
+    return {profit:acc.profit+profit,income:acc.income+income,cost:acc.cost+cost};
+  },{profit:0,income:0,cost:0});
+
+  const sorted = [...records].sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||""));
+
+  const preview = modal!==null ? calcProfit({
+    ...form, setupCost:Number(form.setupCost)||0, otherCost:Number(form.otherCost)||0,
+    monthlyFees:(form.monthlyFees||[]).map(f=>({...f,amount:Number(f.amount)||0})),
+    incomes:(form.incomes||[]).map(i=>({...i,amount:Number(i.amount)||0})),
+  }) : null;
+
+  return (
+    <div style={{ minHeight:"100vh", background:"#0a0f1e", color:"#e2e8f0", paddingBottom:80 }}>
+
+      {/* Header */}
+      <div style={{ background:"linear-gradient(135deg,#0d1b2a,#0a1628)", borderBottom:"1px solid #1e3a5f",
+        padding:"24px 20px 16px", position:"sticky", top:0, zIndex:10 }}>
+        <div style={{ maxWidth:640, margin:"0 auto" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:4 }}>
+            <span style={{ fontSize:22 }}>📱</span>
+            <h1 style={{ fontSize:20, fontWeight:900, letterSpacing:"-0.02em", color:"#fff" }}>MNP管理ノート</h1>
+          </div>
+          <p style={{ fontSize:12, color:"#64748b", marginBottom:14 }}>キャリア乗り換えの収支・記録を管理</p>
+          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
+            <div style={{ display:"flex", gap:4 }}>
+              {[["list","記録一覧"],["timeline","番号別"],["summary","収支サマリー"]].map(([t,label])=>(
+                <button key={t} onClick={()=>setTab(t)} style={{ padding:"6px 16px", borderRadius:8, border:"none",
+                  cursor:"pointer", fontSize:13, fontWeight:600,
+                  background:tab===t?"#00ffc6":"transparent", color:tab===t?"#003d2e":"#64748b" }}>{label}</button>
+              ))}
+            </div>
+            <div style={{ display:"flex", gap:6 }}>
+              <button onClick={()=>{setImportPreview(null);setImportError("");setImportModal(true);}} style={{
+                padding:"6px 12px", borderRadius:8, border:"1px solid #1e3a5f",
+                background:"transparent", color:"#7dd3fc", fontSize:12, fontWeight:700, cursor:"pointer" }}>⬆ 読込</button>
+              <button onClick={handleExport} style={{ padding:"6px 12px", borderRadius:8, border:"1px solid #1e3a5f",
+                background:"transparent", color:"#94a3b8", fontSize:12, fontWeight:700, cursor:"pointer" }}>⬇ 保存</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style={{ maxWidth:640, margin:"0 auto", padding:"20px 16px" }}>
+
+        {/* TIMELINE */}
+        {tab==="timeline" && (()=>{
+          // 電話番号ごとにグループ化
+          const groups = {};
+          records.forEach(r => {
+            const num = r.phoneNumber || "（番号未設定）";
+            if (!groups[num]) groups[num] = [];
+            groups[num].push(r);
+          });
+          // 各グループを開始日順にソート
+          Object.values(groups).forEach(g => g.sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")));
+
+          const CARRIER_COLORS = {
+            "docomo":"#e00","au":"#f60","SoftBank":"#0a0","楽天Mobile":"#c00","ahamo":"#d50060",
+            "povo":"#ff0","LINEMO":"#00b900","UQmobile":"#009944","Y!mobile":"#e91e8c",
+            "IIJmio":"#0066cc","mineo":"#e8470d","NUROmobile":"#00a0e9","その他":"#64748b",
+          };
+          const cColor = c => CARRIER_COLORS[c] || "#64748b";
+
+          return (
+            <div>
+              {Object.entries(groups).map(([num, recs]) => {
+                const totalProfit = recs.reduce((s,r)=>s+calcProfit(r).profit, 0);
+                const activeRec = recs.find(r=>r.status==="active");
+                return (
+                  <div key={num} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:16, marginBottom:16, overflow:"hidden" }}>
+                    {/* 番号ヘッダー */}
+                    <div style={{ padding:"14px 16px 10px", borderBottom:"1px solid #1e293b" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <div>
+                          <div style={{ fontSize:15, fontWeight:900, color:"#fff", fontFamily:"monospace", marginBottom:3 }}>📞 {num}</div>
+                          <div style={{ fontSize:11, color:"#64748b" }}>{recs.length}回のMNP</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontSize:11, color:"#64748b", marginBottom:2 }}>累計純利益</div>
+                          <ProfitChip value={totalProfit} />
+                        </div>
+                      </div>
+                      {activeRec && (
+                        <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:6 }}>
+                          <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:99,
+                            background:"#00ffc6", color:"#003d2e" }}>現在</span>
+                          <span style={{ fontSize:13, fontWeight:700, color:"#fff" }}>{activeRec.carrier}</span>
+                          {activeRec.plan && <span style={{ fontSize:11, color:"#7dd3fc" }}>{activeRec.plan}</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* タイムライン */}
+                    <div style={{ padding:"14px 16px" }}>
+                      {recs.map((r, i) => {
+                        const { profit } = calcProfit(r);
+                        const isLast = i === recs.length - 1;
+                        const isActive = r.status === "active";
+                        return (
+                          <div key={r.id} style={{ display:"flex", gap:12 }}>
+                            {/* 縦線＋ドット */}
+                            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", width:20, flexShrink:0 }}>
+                              <div style={{ width:14, height:14, borderRadius:99, border:`2px solid ${cColor(r.carrier)}`,
+                                background: isActive ? cColor(r.carrier) : "#111827",
+                                boxShadow: isActive ? `0 0 8px ${cColor(r.carrier)}80` : "none",
+                                flexShrink:0, marginTop:2 }} />
+                              {!isLast && <div style={{ width:2, flex:1, background:"#1e293b", minHeight:24, margin:"4px 0" }} />}
+                            </div>
+                            {/* コンテンツ */}
+                            <div style={{ flex:1, paddingBottom: isLast?0:16 }}>
+                              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:3 }}>
+                                <div>
+                                  <span style={{ fontSize:14, fontWeight:700, color:"#fff" }}>{r.carrier}</span>
+                                  {isActive && <span style={{ fontSize:10, fontWeight:700, marginLeft:6, padding:"1px 7px",
+                                    borderRadius:99, background:"#00ffc620", color:"#00ffc6" }}>運用中</span>}
+                                </div>
+                                <ProfitChip value={profit} />
+                              </div>
+                              <div style={{ fontSize:11, color:"#64748b", marginBottom:3 }}>
+                                {fmtDate(r.startDate)} 〜 {r.endDate ? fmtDate(r.endDate) : "現在"}
+                              </div>
+                              {r.plan && <div style={{ fontSize:11, color:"#7dd3fc", marginBottom:3 }}>📦 {r.plan}</div>}
+                              {/* 収入チップ */}
+                              {(r.incomes||[]).length > 0 && (
+                                <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+                                  {(r.incomes||[]).map((inc,j)=>{
+                                    const t=typeMap[inc.type]||{icon:"💰"};
+                                    const recv=(inc.status||"expected")==="received";
+                                    return <span key={j} style={{ fontSize:10, padding:"2px 7px", borderRadius:99,
+                                      background:recv?"#00ffc610":"#7c3aed18",
+                                      border:`1px solid ${recv?"#00ffc630":"#7c3aed40"}`,
+                                      color:recv?"#00ffc6":"#a78bfa" }}>
+                                      {t.icon} +{(Number(inc.amount)||0).toLocaleString()} {recv?"✅":"⏳"}
+                                    </span>;
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {Object.keys(groups).length===0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
+                  <div style={{ fontSize:40 }}>📱</div>
+                  <div style={{ marginTop:12, fontSize:14 }}>まだ記録がありません</div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* SUMMARY */}
+        {tab==="summary" && (
+          <div>
+            <div style={{ background:"linear-gradient(135deg,#003d2e,#001a13)", border:"1px solid #00ffc640",
+              borderRadius:16, padding:"24px 20px", marginBottom:16, textAlign:"center" }}>
+              <div style={{ fontSize:12, color:"#00ffc6", letterSpacing:"0.1em", marginBottom:8 }}>累計純利益</div>
+              <div style={{ fontSize:40, fontWeight:900, color:totals.profit>=0?"#00ffc6":"#ff6b6b", fontFamily:"monospace", letterSpacing:"-0.03em" }}>
+                {totals.profit>=0?"+":""}{totals.profit.toLocaleString()}<span style={{ fontSize:20 }}>円</span>
+              </div>
+              <div style={{ fontSize:12, color:"#64748b", marginTop:8 }}>{records.length}回のMNP</div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
+              {[
+                {label:"総収入",value:`+${totals.income.toLocaleString()}円`,color:"#00ffc6"},
+                {label:"総出費",value:`${totals.cost.toLocaleString()}円`,color:"#ff6b6b"},
+                {label:"MNP回数",value:`${records.length}回`,color:"#7dd3fc"},
+                {label:"運用中",value:`${records.filter(r=>r.status==="active").length}件`,color:"#a78bfa"},
+              ].map(s=>(
+                <div key={s.label} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:12, padding:"16px 14px" }}>
+                  <div style={{ fontSize:11, color:"#64748b", marginBottom:6 }}>{s.label}</div>
+                  <div style={{ fontSize:20, fontWeight:700, color:s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#64748b", marginBottom:10 }}>収入タイプ別合計</div>
+            {(()=>{
+              const byType={};
+              records.forEach(r=>(r.incomes||[]).forEach(inc=>{ byType[inc.type]=(byType[inc.type]||0)+(Number(inc.amount)||0); }));
+              return Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type,amt])=>{
+                const t=typeMap[type]||{icon:"💰",label:type};
+                return <div key={type} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                  background:"#111827", border:"1px solid #1e293b", borderRadius:10, padding:"10px 14px", marginBottom:6 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span>{t.icon}</span><span style={{ fontSize:13, color:"#94a3b8" }}>{t.label}</span>
+                  </div>
+                  <span style={{ fontFamily:"monospace", color:"#00ffc6", fontWeight:700 }}>+{amt.toLocaleString()}円</span>
+                </div>;
+              });
+            })()}
+            <div style={{ fontSize:13, fontWeight:700, color:"#64748b", marginBottom:10, marginTop:20 }}>各MNPの収支</div>
+            {sorted.map(r=>{
+              const {profit,income,cost,months}=calcProfit(r);
+              return <div key={r.id} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:12, padding:"14px 16px", marginBottom:8 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                  <span style={{ fontWeight:700, fontSize:14 }}>{r.carrier}</span>
+                  <ProfitChip value={profit} />
+                </div>
+                <div style={{ fontSize:11, color:"#64748b", marginBottom:6 }}>{fmtDate(r.startDate)} 〜 {fmtDate(r.endDate)||"現在"} ({months}ヶ月)</div>
+                <div style={{ display:"flex", gap:16, fontSize:12 }}>
+                  <span style={{ color:"#00ffc6" }}>収入 +{income.toLocaleString()}円</span>
+                  <span style={{ color:"#ff6b6b" }}>出費 {cost.toLocaleString()}円</span>
+                </div>
+              </div>;
+            })}
+          </div>
+        )}
+
+        {/* LIST */}
+        {tab==="list" && (
+          <div>
+            {sorted.length===0 && <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
+              <div style={{ fontSize:40 }}>📋</div>
+              <div style={{ marginTop:12, fontSize:14 }}>まだ記録がありません</div>
+            </div>}
+            {sorted.map(r=><RecordCard key={r.id} r={r} onEdit={()=>openEdit(r)} onDelete={()=>setDelConfirm(r.id)} />)}
+          </div>
+        )}
+      </div>
+
+      {/* FAB */}
+      <button onClick={openAdd} style={{ position:"fixed", bottom:28, right:20, width:56, height:56, borderRadius:28,
+        background:"linear-gradient(135deg,#00ffc6,#00b386)", border:"none", cursor:"pointer",
+        fontSize:28, color:"#003d2e", boxShadow:"0 4px 24px #00ffc640",
+        display:"flex", alignItems:"center", justifyContent:"center", fontWeight:900 }}>+</button>
+
+      {/* IMPORT MODAL */}
+      {importModal && (
+        <div style={{ position:"fixed", inset:0, background:"#000000cc", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:100 }}
+          onClick={()=>setImportModal(false)}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#111827", borderRadius:"20px 20px 0 0",
+            padding:"24px 20px 40px", width:"100%", maxWidth:640 }}>
+            <h2 style={{ fontSize:18, fontWeight:900, marginBottom:6 }}>データを読み込む</h2>
+            <p style={{ fontSize:12, color:"#64748b", marginBottom:20 }}>以前エクスポートした .json ファイルを選んでください</p>
+            <label style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+              padding:14, borderRadius:12, border:"2px dashed #1e3a5f", cursor:"pointer",
+              color:"#7dd3fc", fontSize:14, fontWeight:700, background:"#0d1117", marginBottom:16 }}>
+              <span>📂</span><span>JSONファイルを選択</span>
+              <input type="file" accept=".json,application/json" onChange={handleImportFile} style={{ display:"none" }} />
+            </label>
+            {importError && <div style={{ background:"#3f1515", border:"1px solid #7f1d1d", borderRadius:10,
+              padding:"10px 14px", color:"#ff6b6b", fontSize:13, marginBottom:16 }}>⚠ {importError}</div>}
+            {importPreview && (
+              <div>
+                <div style={{ background:"#00ffc610", border:"1px solid #00ffc630", borderRadius:10,
+                  padding:"10px 14px", marginBottom:16 }}>
+                  <span style={{ color:"#00ffc6", fontWeight:700, fontSize:13 }}>✅ {importPreview.length}件のデータを検出</span>
+                </div>
+                <div style={{ marginBottom:16 }}>
+                  <div style={{ fontSize:12, color:"#64748b", marginBottom:8, fontWeight:700 }}>読み込み方法</div>
+                  <div style={{ display:"flex", borderRadius:10, overflow:"hidden", border:"1px solid #1e293b" }}>
+                    {[{v:"merge",label:"🔀 追記（重複スキップ）",desc:"既存データを残して追加"},
+                      {v:"replace",label:"♻ 全置換",desc:"既存データを削除して上書き"}].map(opt=>(
+                      <button key={opt.v} onClick={()=>setImportMode(opt.v)} style={{ flex:1, padding:"10px 8px", border:"none", cursor:"pointer",
+                        background:importMode===opt.v?(opt.v==="replace"?"#7f1d1d":"#003d2e"):"#0d1117",
+                        color:importMode===opt.v?(opt.v==="replace"?"#ff6b6b":"#00ffc6"):"#475569",
+                        fontSize:12, fontWeight:700, borderRight:opt.v==="merge"?"1px solid #1e293b":"none" }}>
+                        <div>{opt.label}</div>
+                        <div style={{ fontSize:10, fontWeight:400, marginTop:2, opacity:0.8 }}>{opt.desc}</div>
+                      </button>
+                    ))}
+                  </div>
+                  {importMode==="replace" && <div style={{ fontSize:11, color:"#ff6b6b", marginTop:6 }}>⚠ 現在の{records.length}件のデータが削除されます</div>}
+                </div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <button onClick={()=>setImportModal(false)} style={{ flex:1, padding:"13px 0", borderRadius:12, border:"1px solid #1e293b",
+                    background:"transparent", color:"#64748b", fontSize:14, fontWeight:700, cursor:"pointer" }}>キャンセル</button>
+                  <button onClick={confirmImport} style={{ flex:2, padding:"13px 0", borderRadius:12, border:"none",
+                    background:importMode==="replace"?"linear-gradient(135deg,#ef4444,#b91c1c)":"linear-gradient(135deg,#00ffc6,#00b386)",
+                    color:importMode==="replace"?"#fff":"#003d2e", fontSize:14, fontWeight:900, cursor:"pointer" }}>
+                    {importMode==="replace"?"⚠ 全置換して読み込む":"追記して読み込む"}
+                  </button>
+                </div>
+              </div>
+            )}
+            {!importPreview && !importError && (
+              <button onClick={()=>setImportModal(false)} style={{ width:"100%", padding:"13px 0", borderRadius:12,
+                border:"1px solid #1e293b", background:"transparent", color:"#64748b", fontSize:14, fontWeight:700, cursor:"pointer" }}>キャンセル</button>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* EDIT/ADD MODAL */}
+      {modal!==null && (
+        <div style={{ position:"fixed", inset:0, background:"#000000cc", display:"flex", alignItems:"flex-end", justifyContent:"center", zIndex:100 }}
+          onClick={closeModal}>
+          <div onClick={e=>e.stopPropagation()} style={{ background:"#111827", borderRadius:"20px 20px 0 0",
+            padding:"24px 20px 40px", width:"100%", maxWidth:640, maxHeight:"92vh", overflowY:"auto" }}>
+            <h2 style={{ fontSize:18, fontWeight:900, marginBottom:20 }}>
+              {modal==="add"?"新しいMNPを記録":"記録を編集"}
+            </h2>
+            {[
+              {key:"carrier",label:"キャリア",type:"select",options:CARRIERS},
+              {key:"status",label:"ステータス",type:"select",options:["active","ended"],labels:STATUS_LABELS},
+              {key:"phoneNumber",label:"電話番号",type:"text",placeholder:"070-XXXX-XXXX"},
+              {key:"plan",label:"プラン名",type:"text",placeholder:"例: ahamo 20GB"},
+              {key:"startDate",label:"開始日",type:"date"},
+              {key:"endDate",label:"終了日（MNP転出日）",type:"date"},
+            ].map(f=>(
+              <div key={f.key} style={{ marginBottom:14 }}>
+                <label style={{ display:"block", fontSize:12, color:"#64748b", marginBottom:4 }}>{f.label}</label>
+                {f.type==="select"
+                  ? <select value={form[f.key]} onChange={e=>setForm(fm=>({...fm,[f.key]:e.target.value}))} style={IS}>
+                      {f.options.map(o=><option key={o} value={o}>{f.labels?f.labels[o]:o}</option>)}
+                    </select>
+                  : <input type={f.type} value={form[f.key]} placeholder={f.placeholder}
+                      onChange={e=>setForm(fm=>({...fm,[f.key]:e.target.value}))} style={IS} />
+                }
+              </div>
+            ))}
+            <IncomeEditor incomes={form.incomes} onChange={incomes=>setForm(fm=>({...fm,incomes}))} />
+            <MonthlyFeesEditor fees={form.monthlyFees} onChange={fees=>setForm(fm=>({...fm,monthlyFees:fees}))} />
+            <div style={{ fontSize:12, color:"#64748b", fontWeight:700, marginBottom:10, marginTop:4 }}>その他費用</div>
+            {[{key:"setupCost",label:"初期費用（SIM代など）（円）"},{key:"otherCost",label:"その他費用（円）"}].map(f=>(
+              <div key={f.key} style={{ marginBottom:12 }}>
+                <label style={{ display:"block", fontSize:12, color:"#64748b", marginBottom:4 }}>{f.label}</label>
+                <input type="number" value={form[f.key]} placeholder="0"
+                  onChange={e=>setForm(fm=>({...fm,[f.key]:e.target.value}))} style={IS} />
+              </div>
+            ))}
+            {preview && (
+              <div style={{ background:"#0d1117", border:"1px solid #1e293b", borderRadius:12, padding:"12px 16px",
+                marginBottom:16, display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, textAlign:"center" }}>
+                {[{label:"収入",value:preview.income,color:"#00ffc6"},
+                  {label:"出費",value:preview.cost,color:"#ff6b6b"},
+                  {label:"純利益",value:preview.profit,color:preview.profit>=0?"#00ffc6":"#ff6b6b"}].map(s=>(
+                  <div key={s.label}>
+                    <div style={{ fontSize:10, color:"#475569", marginBottom:3 }}>{s.label}</div>
+                    <div style={{ fontSize:14, fontWeight:700, color:s.color, fontFamily:"monospace" }}>
+                      {s.value>=0?"+":""}{s.value.toLocaleString()}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div style={{ marginBottom:20 }}>
+              <label style={{ display:"block", fontSize:12, color:"#64748b", marginBottom:4 }}>メモ</label>
+              <textarea value={form.notes} onChange={e=>setForm(fm=>({...fm,notes:e.target.value}))}
+                placeholder="キャンペーン詳細、注意点など..."
+                style={{ ...IS, height:72, resize:"vertical" }} />
+            </div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={closeModal} style={{ flex:1, padding:"14px 0", borderRadius:12, border:"1px solid #1e293b",
+                background:"transparent", color:"#64748b", fontSize:15, fontWeight:700, cursor:"pointer" }}>キャンセル</button>
+              <button onClick={saveForm} style={{ flex:2, padding:"14px 0", borderRadius:12, border:"none",
+                background:"linear-gradient(135deg,#00ffc6,#00b386)", color:"#003d2e", fontSize:15, fontWeight:900, cursor:"pointer" }}>保存</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* DELETE CONFIRM */}
+      {delConfirm && (
+        <div style={{ position:"fixed", inset:0, background:"#000000cc", display:"flex", alignItems:"center", justifyContent:"center", zIndex:200, padding:20 }}>
+          <div style={{ background:"#111827", borderRadius:16, padding:24, maxWidth:320, width:"100%" }}>
+            <div style={{ fontSize:16, fontWeight:700, marginBottom:8 }}>削除しますか？</div>
+            <div style={{ fontSize:13, color:"#64748b", marginBottom:20 }}>この記録は削除されます。</div>
+            <div style={{ display:"flex", gap:10 }}>
+              <button onClick={()=>setDelConfirm(null)} style={{ flex:1, padding:"12px 0", borderRadius:10, border:"1px solid #1e293b",
+                background:"transparent", color:"#94a3b8", fontSize:14, fontWeight:600, cursor:"pointer" }}>キャンセル</button>
+              <button onClick={()=>delRecord(delConfirm)} style={{ flex:1, padding:"12px 0", borderRadius:10, border:"none",
+                background:"#7f1d1d", color:"#ff6b6b", fontSize:14, fontWeight:700, cursor:"pointer" }}>削除</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
