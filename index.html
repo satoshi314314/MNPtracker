@@ -339,7 +339,7 @@ function App() {
   const [modal, setModal] = useState(null);
   const [form, setForm] = useState(emptyForm);
   const [delConfirm, setDelConfirm] = useState(null);
-  const [tab, setTab] = useState("list");
+  const [tab, setTab] = useState("timeline");
   const [importModal, setImportModal] = useState(false);
   const [importPreview, setImportPreview] = useState(null);
   const [importError, setImportError] = useState("");
@@ -495,7 +495,7 @@ function App() {
                     </div>
 
                     {/* タイムライン */}
-                    <div style={{ padding:"14px 16px" }}>
+                    <div style={{ padding:"14px 16px 0" }}>
                       {recs.map((r, i) => {
                         const { profit } = calcProfit(r);
                         const isLast = i === recs.length - 1;
@@ -518,7 +518,11 @@ function App() {
                                   {isActive && <span style={{ fontSize:10, fontWeight:700, marginLeft:6, padding:"1px 7px",
                                     borderRadius:99, background:"#00ffc620", color:"#00ffc6" }}>運用中</span>}
                                 </div>
-                                <ProfitChip value={profit} />
+                                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                                  <ProfitChip value={profit} />
+                                  <button onClick={()=>openEdit(r)} style={{ background:"none", border:"none", color:"#7dd3fc", cursor:"pointer", fontSize:13, padding:"2px 4px" }}>✏️</button>
+                                  <button onClick={()=>setDelConfirm(r.id)} style={{ background:"none", border:"none", color:"#ff6b6b", cursor:"pointer", fontSize:13, padding:"2px 4px" }}>🗑</button>
+                                </div>
                               </div>
                               <div style={{ fontSize:11, color:"#64748b", marginBottom:3 }}>
                                 {fmtDate(r.startDate)} 〜 {r.endDate ? fmtDate(r.endDate) : "現在"}
@@ -544,6 +548,13 @@ function App() {
                         );
                       })}
                     </div>
+                    {/* この番号で追加ボタン */}
+                    <button onClick={()=>{ setForm({...emptyForm, phoneNumber: num==="（番号未設定）"?"":num}); setModal("add"); }}
+                      style={{ width:"100%", padding:"12px 0", background:"none", border:"none",
+                        borderTop:"1px dashed #1e3a5f", color:"#00ffc6", fontSize:13, fontWeight:700,
+                        cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center", gap:6 }}>
+                      ＋ この番号でMNPを追加
+                    </button>
                   </div>
                 );
               })}
