@@ -427,11 +427,33 @@ function App() {
           <p style={{ fontSize:12, color:"#64748b", marginBottom:14 }}>キャリア乗り換えの収支・記録を管理</p>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <div style={{ display:"flex", gap:4 }}>
-              {[["list","記録一覧"],["timeline","番号別"],["summary","収支サマリー"]].map(([t,label])=>(
+              {[["timeline","番号別"],["alert","MNPアラート"],["summary","収支サマリー"]].map(([t,label])=>{
                 <button key={t} onClick={()=>setTab(t)} style={{ padding:"6px 16px", borderRadius:8, border:"none",
                   cursor:"pointer", fontSize:13, fontWeight:600,
-                  background:tab===t?"#00ffc6":"transparent", color:tab===t?"#003d2e":"#64748b" }}>{label}</button>
-              ))}
+                  const alertCount = (()=>{
+                  const now = new Date();
+                  const groups2 = {};
+                  records.forEach(r=>{ const n=r.phoneNumber||"（番号未設定）"; if(!groups2[n])groups2[n]=[]; groups2[n].push(r); });
+                  return Object.values(groups2).filter(recs=>{
+                    const latest = [...recs].sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||""))[0];
+                    if(!latest?.startDate) return false;
+                    const diff = (now - new Date(latest.startDate)) / (1000*60*60*24*30);
+                    return diff >= 4;
+                  }).length;
+                })();
+                return (
+                  <button key={t} onClick={()=>setTab(t)} style={{ padding:"6px 16px", borderRadius:8, border:"none",
+                    cursor:"pointer", fontSize:13, fontWeight:600, position:"relative",
+                    background:tab===t?"#00ffc6":"transparent", color:tab===t?"#003d2e":"#64748b" }}>
+                    {label}
+                    {t==="alert" && alertCount>0 && (
+                      <span style={{ position:"absolute", top:-4, right:-4, background:"#ff6b6b", color:"#fff",
+                        borderRadius:99, fontSize:10, fontWeight:900, minWidth:16, height:16,
+                        display:"flex", alignItems:"center", justifyContent:"center", padding:"0 4px" }}>{alertCount}</span>
+                    )}
+                  </button>
+                );
+              })}
             </div>
             <div style={{ display:"flex", gap:6 }}>
               <button onClick={()=>{setImportPreview(null);setImportError("");setImportModal(true);}} style={{
@@ -625,14 +647,149 @@ function App() {
           </div>
         )}
 
-        {/* LIST */}
-        {tab==="list" && (
+        {/* ALERT */}
+        {tab==="alert" && (()=>{
+          const now = new Date();
+          const groups = {};
+          records.forEach(r=>{ const n=r.phoneNumber||"（番号未設定）"; if(!groups[n])groups[n]=[]; groups[n].push(r); });
+          const items = Object.entries(groups).map(([num, recs])=>{
+            const latest = [...recs].sort((a,b)=>(b.startDate||"").localeCompare(a.startDate||""))[0];
+            const monthsElapsed = latest?.startDate ? (now - new Date(latest.startDate)) / (1000*60*60*24*30) : 0;
+            return { num, latest, monthsElapsed, recs };
+          }).sort((a,b)=>b.monthsElapsed - a.monthsElapsed);
+
+          const ready = items.filter(x=>x.monthsElapsed>=4);
+          const notYet = items.filter(x=>x.monthsElapsed<4);
+
+          return (
+            <div>
+              {ready.length>0 && (
+                <div>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#ff6b6b", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                    <span>🔔</span> MNP可能な番号（{ready.length}件）
+                  </div>
+                  {ready.map(({num, latest, monthsElapsed})=>(
+                    <div key={num} style={{ background:"#1a0a0a", border:"1px solid #ff6b6b40", borderRadius:14, padding:"16px", marginBottom:10 }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:8 }}>
+                        <div>
+                          <div style={{ fontSize:14, fontWeight:900, color:"#fff", fontFamily:"monospace" }}>📞 {num}</div>
+                          <div style={{ fontSize:12, color:"#94a3b8", marginTop:3 }}>
+                            {latest.carrier} / {fmtDate(latest.startDate)}〜
+                          </div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontSize:22, fontWeight:900, color:"#ff6b6b" }}>{Math.floor(monthsElapsed)}ヶ月</div>
+                          <div style={{ fontSize:10, color:"#ff6b6b80" }}>経過</div>
+                        </div>
+                      </div>
+                      <div style={{ background:"#ff6b6b15", border:"1px solid #ff6b6b30", borderRadius:8, padding:"8px 12px",
+                        fontSize:12, color:"#ff6b6b", fontWeight:700 }}>
+                        ✅ MNP転出OKです！
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {notYet.length>0 && (
+                <div style={{ marginTop: ready.length>0 ? 20 : 0 }}>
+                  <div style={{ fontSize:13, fontWeight:700, color:"#64748b", marginBottom:10, display:"flex", alignItems:"center", gap:6 }}>
+                    <span>⏳</span> まだ早い番号（{notYet.length}件）
+                  </div>
+                  {notYet.map(({num, latest, monthsElapsed})=>{
+                    const remaining = 4 - monthsElapsed;
+                    const pct = Math.min(100, (monthsElapsed/4)*100);
+                    const readyDate = latest?.startDate ? new Date(new Date(latest.startDate).getTime() + 4*30*24*60*60*1000) : null;
+                    return (
+                      <div key={num} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:14, padding:"16px", marginBottom:10 }}>
+                        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+                          <div>
+                            <div style={{ fontSize:14, fontWeight:900, color:"#fff", fontFamily:"monospace" }}>📞 {num}</div>
+                            <div style={{ fontSize:12, color:"#94a3b8", marginTop:3 }}>
+                              {latest.carrier} / {fmtDate(latest.startDate)}〜
+                            </div>
+                          </div>
+                          <div style={{ textAlign:"right" }}>
+                            <div style={{ fontSize:18, fontWeight:900, color:"#7dd3fc" }}>あと{Math.ceil(remaining*30)}日</div>
+                            {readyDate && <div style={{ fontSize:10, color:"#64748b" }}>{readyDate.toLocaleDateString("ja-JP",{month:"long",day:"numeric"})}〜</div>}
+                          </div>
+                        </div>
+                        {/* プログレスバー */}
+                        <div style={{ background:"#1e293b", borderRadius:99, height:6, overflow:"hidden" }}>
+                          <div style={{ width:`${pct}%`, height:"100%", borderRadius:99,
+                            background:"linear-gradient(90deg,#7dd3fc,#00ffc6)", transition:"width 0.3s" }} />
+                        </div>
+                        <div style={{ fontSize:10, color:"#475569", marginTop:4, textAlign:"right" }}>{Math.floor(monthsElapsed)}ヶ月 / 4ヶ月</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+
+              {items.length===0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
+                  <div style={{ fontSize:40 }}>📱</div>
+                  <div style={{ marginTop:12, fontSize:14 }}>記録がありません</div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
+
+        {/* SUMMARY */}
+        {tab==="summary" && (
           <div>
-            {sorted.length===0 && <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
-              <div style={{ fontSize:40 }}>📋</div>
-              <div style={{ marginTop:12, fontSize:14 }}>まだ記録がありません</div>
-            </div>}
-            {sorted.map(r=><RecordCard key={r.id} r={r} onEdit={()=>openEdit(r)} onDelete={()=>setDelConfirm(r.id)} />)}
+            <div style={{ background:"linear-gradient(135deg,#003d2e,#001a13)", border:"1px solid #00ffc640",
+              borderRadius:16, padding:"24px 20px", marginBottom:16, textAlign:"center" }}>
+              <div style={{ fontSize:12, color:"#00ffc6", letterSpacing:"0.1em", marginBottom:8 }}>累計純利益</div>
+              <div style={{ fontSize:40, fontWeight:900, color:totals.profit>=0?"#00ffc6":"#ff6b6b", fontFamily:"monospace", letterSpacing:"-0.03em" }}>
+                {totals.profit>=0?"+":""}{totals.profit.toLocaleString()}<span style={{ fontSize:20 }}>円</span>
+              </div>
+              <div style={{ fontSize:12, color:"#64748b", marginTop:8 }}>{records.length}回のMNP</div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:20 }}>
+              {[
+                {label:"総収入",value:`+${totals.income.toLocaleString()}円`,color:"#00ffc6"},
+                {label:"総出費",value:`${totals.cost.toLocaleString()}円`,color:"#ff6b6b"},
+                {label:"MNP回数",value:`${records.length}回`,color:"#7dd3fc"},
+                {label:"運用中",value:`${records.filter(r=>r.status==="active").length}件`,color:"#a78bfa"},
+              ].map(s=>(
+                <div key={s.label} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:12, padding:"16px 14px" }}>
+                  <div style={{ fontSize:11, color:"#64748b", marginBottom:6 }}>{s.label}</div>
+                  <div style={{ fontSize:20, fontWeight:700, color:s.color }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize:13, fontWeight:700, color:"#64748b", marginBottom:10 }}>収入タイプ別合計</div>
+            {(()=>{
+              const byType={};
+              records.forEach(r=>(r.incomes||[]).forEach(inc=>{ byType[inc.type]=(byType[inc.type]||0)+(Number(inc.amount)||0); }));
+              return Object.entries(byType).sort((a,b)=>b[1]-a[1]).map(([type,amt])=>{
+                const t=typeMap[type]||{icon:"💰",label:type};
+                return <div key={type} style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
+                  background:"#111827", border:"1px solid #1e293b", borderRadius:10, padding:"10px 14px", marginBottom:6 }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <span>{t.icon}</span><span style={{ fontSize:13, color:"#94a3b8" }}>{t.label}</span>
+                  </div>
+                  <span style={{ fontFamily:"monospace", color:"#00ffc6", fontWeight:700 }}>+{amt.toLocaleString()}円</span>
+                </div>;
+              });
+            })()}
+            <div style={{ fontSize:13, fontWeight:700, color:"#64748b", marginBottom:10, marginTop:20 }}>各MNPの収支</div>
+            {sorted.map(r=>{
+              const {profit,income,cost,months}=calcProfit(r);
+              return <div key={r.id} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:12, padding:"14px 16px", marginBottom:8 }}>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:4 }}>
+                  <span style={{ fontWeight:700, fontSize:14 }}>{r.carrier}</span>
+                  <ProfitChip value={profit} />
+                </div>
+                <div style={{ fontSize:11, color:"#64748b", marginBottom:6 }}>{fmtDate(r.startDate)} 〜 {fmtDate(r.endDate)||"現在"} ({months}ヶ月)</div>
+                <div style={{ display:"flex", gap:16, fontSize:12 }}>
+                  <span style={{ color:"#00ffc6" }}>収入 +{income.toLocaleString()}円</span>
+                  <span style={{ color:"#ff6b6b" }}>出費 {cost.toLocaleString()}円</span>
+                </div>
+              </div>;
+            })}
           </div>
         )}
       </div>
