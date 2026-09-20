@@ -427,7 +427,7 @@ function App() {
           <p style={{ fontSize:12, color:"#64748b", marginBottom:14 }}>キャリア乗り換えの収支・記録を管理</p>
           <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between" }}>
             <div style={{ display:"flex", gap:4 }}>
-              {[["list","記録一覧"],["summary","収支サマリー"]].map(([t,label])=>(
+              {[["list","記録一覧"],["timeline","番号別"],["summary","収支サマリー"]].map(([t,label])=>(
                 <button key={t} onClick={()=>setTab(t)} style={{ padding:"6px 16px", borderRadius:8, border:"none",
                   cursor:"pointer", fontSize:13, fontWeight:600,
                   background:tab===t?"#00ffc6":"transparent", color:tab===t?"#003d2e":"#64748b" }}>{label}</button>
@@ -445,6 +445,117 @@ function App() {
       </div>
 
       <div style={{ maxWidth:640, margin:"0 auto", padding:"20px 16px" }}>
+
+        {/* TIMELINE */}
+        {tab==="timeline" && (()=>{
+          // 電話番号ごとにグループ化
+          const groups = {};
+          records.forEach(r => {
+            const num = r.phoneNumber || "（番号未設定）";
+            if (!groups[num]) groups[num] = [];
+            groups[num].push(r);
+          });
+          // 各グループを開始日順にソート
+          Object.values(groups).forEach(g => g.sort((a,b)=>(a.startDate||"").localeCompare(b.startDate||"")));
+
+          const CARRIER_COLORS = {
+            "docomo":"#e00","au":"#f60","SoftBank":"#0a0","楽天Mobile":"#c00","ahamo":"#d50060",
+            "povo":"#ff0","LINEMO":"#00b900","UQmobile":"#009944","Y!mobile":"#e91e8c",
+            "IIJmio":"#0066cc","mineo":"#e8470d","NUROmobile":"#00a0e9","その他":"#64748b",
+          };
+          const cColor = c => CARRIER_COLORS[c] || "#64748b";
+
+          return (
+            <div>
+              {Object.entries(groups).map(([num, recs]) => {
+                const totalProfit = recs.reduce((s,r)=>s+calcProfit(r).profit, 0);
+                const activeRec = recs.find(r=>r.status==="active");
+                return (
+                  <div key={num} style={{ background:"#111827", border:"1px solid #1e293b", borderRadius:16, marginBottom:16, overflow:"hidden" }}>
+                    {/* 番号ヘッダー */}
+                    <div style={{ padding:"14px 16px 10px", borderBottom:"1px solid #1e293b" }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <div>
+                          <div style={{ fontSize:15, fontWeight:900, color:"#fff", fontFamily:"monospace", marginBottom:3 }}>📞 {num}</div>
+                          <div style={{ fontSize:11, color:"#64748b" }}>{recs.length}回のMNP</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          <div style={{ fontSize:11, color:"#64748b", marginBottom:2 }}>累計純利益</div>
+                          <ProfitChip value={totalProfit} />
+                        </div>
+                      </div>
+                      {activeRec && (
+                        <div style={{ marginTop:8, display:"flex", alignItems:"center", gap:6 }}>
+                          <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:99,
+                            background:"#00ffc6", color:"#003d2e" }}>現在</span>
+                          <span style={{ fontSize:13, fontWeight:700, color:"#fff" }}>{activeRec.carrier}</span>
+                          {activeRec.plan && <span style={{ fontSize:11, color:"#7dd3fc" }}>{activeRec.plan}</span>}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* タイムライン */}
+                    <div style={{ padding:"14px 16px" }}>
+                      {recs.map((r, i) => {
+                        const { profit } = calcProfit(r);
+                        const isLast = i === recs.length - 1;
+                        const isActive = r.status === "active";
+                        return (
+                          <div key={r.id} style={{ display:"flex", gap:12 }}>
+                            {/* 縦線＋ドット */}
+                            <div style={{ display:"flex", flexDirection:"column", alignItems:"center", width:20, flexShrink:0 }}>
+                              <div style={{ width:14, height:14, borderRadius:99, border:`2px solid ${cColor(r.carrier)}`,
+                                background: isActive ? cColor(r.carrier) : "#111827",
+                                boxShadow: isActive ? `0 0 8px ${cColor(r.carrier)}80` : "none",
+                                flexShrink:0, marginTop:2 }} />
+                              {!isLast && <div style={{ width:2, flex:1, background:"#1e293b", minHeight:24, margin:"4px 0" }} />}
+                            </div>
+                            {/* コンテンツ */}
+                            <div style={{ flex:1, paddingBottom: isLast?0:16 }}>
+                              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:3 }}>
+                                <div>
+                                  <span style={{ fontSize:14, fontWeight:700, color:"#fff" }}>{r.carrier}</span>
+                                  {isActive && <span style={{ fontSize:10, fontWeight:700, marginLeft:6, padding:"1px 7px",
+                                    borderRadius:99, background:"#00ffc620", color:"#00ffc6" }}>運用中</span>}
+                                </div>
+                                <ProfitChip value={profit} />
+                              </div>
+                              <div style={{ fontSize:11, color:"#64748b", marginBottom:3 }}>
+                                {fmtDate(r.startDate)} 〜 {r.endDate ? fmtDate(r.endDate) : "現在"}
+                              </div>
+                              {r.plan && <div style={{ fontSize:11, color:"#7dd3fc", marginBottom:3 }}>📦 {r.plan}</div>}
+                              {/* 収入チップ */}
+                              {(r.incomes||[]).length > 0 && (
+                                <div style={{ display:"flex", gap:4, flexWrap:"wrap", marginTop:4 }}>
+                                  {(r.incomes||[]).map((inc,j)=>{
+                                    const t=typeMap[inc.type]||{icon:"💰"};
+                                    const recv=(inc.status||"expected")==="received";
+                                    return <span key={j} style={{ fontSize:10, padding:"2px 7px", borderRadius:99,
+                                      background:recv?"#00ffc610":"#7c3aed18",
+                                      border:`1px solid ${recv?"#00ffc630":"#7c3aed40"}`,
+                                      color:recv?"#00ffc6":"#a78bfa" }}>
+                                      {t.icon} +{(Number(inc.amount)||0).toLocaleString()} {recv?"✅":"⏳"}
+                                    </span>;
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })}
+              {Object.keys(groups).length===0 && (
+                <div style={{ textAlign:"center", padding:"60px 0", color:"#334155" }}>
+                  <div style={{ fontSize:40 }}>📱</div>
+                  <div style={{ marginTop:12, fontSize:14 }}>まだ記録がありません</div>
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* SUMMARY */}
         {tab==="summary" && (
